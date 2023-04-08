@@ -1,0 +1,128 @@
+name: c910v
+
+on:
+  push:
+ 
+  schedule:
+    - cron: "0 2 * * *"
+
+jobs:
+  create-kernel:
+    runs-on: 	ubuntu-22.04
+    env:
+      xuetie_toolchain: https://occ-oss-prod.oss-cn-hangzhou.aliyuncs.com/resource//1663142514282
+      toolchain_file_name: Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.6.1-20220906.tar.gz
+      kernel_branch: lpi4a
+      kernel_name: revyos/thead-kernel
+      kernel_git: https://github.com/revyos/thead-kernel.git
+      img_branch: master
+      img_name: revyos/gpu_bxm_4_64-kernel
+      img_module: https://github.com/revyos/gpu_bxm_4_64-kernel.git
+      uboot_branch: lpi4a
+      uboot_name: revyos/thead-u-boot
+      uboot_git: https://github.com/revyos/thead-u-boot.git
+      toolchain_tripe: riscv64-unknown-linux-gnu-
+      ARCH: riscv
+
+    steps:
+      - name: Install software
+        run: |
+              sudo apt update && \
+              sudo apt install -y gdisk dosfstools g++-12-riscv64-linux-gnu build-essential \
+                                  libncurses-dev gawk flex bison openssl libssl-dev tree \
+                                  dkms libelf-dev libudev-dev libpci-dev libiberty-dev autoconf device-tree-compiler
+              sudo update-alternatives --install \
+                  /usr/bin/riscv64-linux-gnu-gcc riscv64-gcc /usr/bin/riscv64-linux-gnu-gcc-12 10
+              sudo update-alternatives --install \
+                  /usr/bin/riscv64-linux-gnu-g++ riscv64-g++ /usr/bin/riscv64-linux-gnu-g++-12 10
+
+      - name: Checkout kernel
+        uses: actions/checkout@v3
+        with:
+            repository: 'revyos/thead-kernel'
+            ref: 'lpi4a'
+            path: 'kernel'
+      
+      - name: Checkout img
+        uses: actions/checkout@v3
+        with:
+            repository: 'revyos/gpu_bxm_4_64-kernel'
+            ref: 'master'
+            path: 'img_module'
+      
+      - name: Checkout uboot
+        uses: actions/checkout@v3
+        with:
+            repository: 'revyos/thead-u-boot'
+            ref: 'lpi4a'
+            path: 'uboot'
+
+      - name: Compile Kernel && Install
+        run: |
+              mkdir rootfs && mkdir rootfs/boot
+              wget ${xuetie_toolchain}/${toolchain_file_name}
+              tar -xvf ${toolchain_file_name} -C /opt
+
+              export PATH="/opt/Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.6.1/bin:$PATH"
+
+              # git clone -b ${kernel_branch} --depth=1 ${kernel_git} kernel
+              pushd kernel
+                make CROSS_COMPILE=${toolchain_tripe} ARCH=${ARCH} light_defconfig
+                make CROSS_COMPILE=${toolchain_tripe} ARCH=${ARCH} -j$(nproc)
+                make CROSS_COMPILE=${toolchain_tripe} ARCH=${ARCH} -j$(nproc) dtbs
+                if [ x"$(cat .config | grep CONFIG_MODULES=y)" = x"CONFIG_MODULES=y" ]; then
+                  sudo make CROSS_COMPILE=${toolchain_tripe} ARCH=${ARCH} INSTALL_MOD_PATH=${GITHUB_WORKSPACE}/rootfs/ modules_install -j$(nproc)
+                fi
+                sudo make CROSS_COMPILE=${toolchain_tripe} ARCH=${ARCH} INSTALL_PATH=${GITHUB_WORKSPACE}/rootfs/boot zinstall -j$(nproc)
+
+                # Install Kernel
+                sudo cp -v arch/riscv/boot/Image ${GITHUB_WORKSPACE}/rootfs/boot/
+                sudo cp -v arch/riscv/boot/Image.gz ${GITHUB_WORKSPACE}/rootfs/boot/
+
+                # Install DTB
+                sudo cp -v arch/riscv/boot/dts/thead/*.dtb ${GITHUB_WORKSPACE}/rootfs/boot/
+              popd
+
+      # - name: IMG_MODULE compile
+      #   run: |
+      #         export PATH="/opt/Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.6.1/bin:$PATH"
+      #         pushd img_module
+      #           export KERNELDIR=${GITHUB_WORKSPACE}/kernel/
+      #           make
+      #           cp -vr output ${GITHUB_WORKSPACE}/rootfs/
+      #           for kernel_version in $(ls ${GITHUB_WORKSPACE}/rootfs/lib/modules/);
+      #           do
+      #             sudo install -D -p -m 644 output/lib/modules/${kernel_version}/extra/drm_nulldisp.ko \
+      #               "${GITHUB_WORKSPACE}/rootfs/lib/modules/${kernel_version}/extra/drm_nulldisp.ko"
+      #             sudo install -D -p -m 644 output/lib/modules/${kernel_version}/extra/pvrsrvkm.ko \
+      #               "${GITHUB_WORKSPACE}/rootfs/lib/modules/${kernel_version}/extra/pvrsrvkm.ko"
+      #             sudo depmod -a -b "${GITHUB_WORKSPACE}/rootfs" "${kernel_version}"
+      #           done
+      #           # cp -vr output/lib/firmware ${GITHUB_WORKSPACE}/rootfs/
+      #         popd
+      #         tree ${GITHUB_WORKSPACE}/rootfs
+
+      - name: uboot compile
+        run: |
+              export PATH="/opt/Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.6.1/bin:$PATH"
+
+              pushd uboot
+                sed -i "s/YYLTYPE yylloc;/extern YYLTYPE yylloc;/" scripts/dtc/dtc-lexer.l
+                make ARCH=${ARCH} CROSS_COMPILE=${toolchain_tripe} light_lpi4a_defconfig
+                make ARCH=${ARCH} CROSS_COMPILE=${toolchain_tripe} -j$(nproc)
+                find . -name "u-boot-with-spl.bin" | xargs -I{} cp -av {} ${GITHUB_WORKSPACE}/rootfs/u-boot-with-spl-lpi4a.bin
+                make ARCH=${ARCH} CROSS_COMPILE=${toolchain_tripe} clean
+                make ARCH=${ARCH} CROSS_COMPILE=${toolchain_tripe} light_a_val_defconfig
+                make ARCH=${ARCH} CROSS_COMPILE=${toolchain_tripe} -j$(nproc)
+                find . -name "u-boot-with-spl.bin" | xargs -I{} cp -av {} ${GITHUB_WORKSPACE}/rootfs/u-boot-with-spl-vala.bin
+              popd
+              
+      - name: compress
+        run: tar -zcvf kernel.tar.gz rootfs
+
+      - name: 'Upload Artifact'
+        uses: actions/upload-artifact@v3
+        with:
+          name: kernel.tar.gz
+          path: kernel.tar.gz
+          retention-days: 10
