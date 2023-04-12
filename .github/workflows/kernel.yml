@@ -6,29 +6,22 @@ on:
   schedule:
     - cron: "0 2 * * *"
 
+env:
+  xuetie_toolchain: https://occ-oss-prod.oss-cn-hangzhou.aliyuncs.com/resource//1663142514282
+  toolchain_file_name: Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.6.1-20220906.tar.gz
+  toolchain_tripe: riscv64-unknown-linux-gnu-
+  ARCH: riscv
+
 jobs:
-  create-kernel:
+  kernel:
     runs-on: 	ubuntu-22.04
     env:
-      xuetie_toolchain: https://occ-oss-prod.oss-cn-hangzhou.aliyuncs.com/resource//1663142514282
-      toolchain_file_name: Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.6.1-20220906.tar.gz
       kernel_branch: lpi4a
       kernel_name: revyos/thead-kernel
       kernel_git: https://github.com/revyos/thead-kernel.git
       img_branch: master
       img_name: revyos/gpu_bxm_4_64-kernel
       img_module: https://github.com/revyos/gpu_bxm_4_64-kernel.git
-      uboot_branch: lpi4a
-      uboot_name: revyos/thead-u-boot
-      uboot_git: https://github.com/revyos/thead-u-boot.git
-      opensbi_branch: lpi4a
-      opensbi_name: revyos/thead-opensbi
-      opensbi_git: https://github.com/revyos/thead-opensbi.git
-      rtl8723ds_branch: master
-      rtl8723ds_name: revyos/rtl8723ds
-      rtl8723ds_git: https://github.com/revyos/rtl8723ds.git
-      toolchain_tripe: riscv64-unknown-linux-gnu-
-      ARCH: riscv
 
     steps:
       - name: Install software
@@ -55,34 +48,15 @@ jobs:
             repository: 'revyos/gpu_bxm_4_64-kernel'
             ref: 'master'
             path: 'img_module'
-      
-      - name: Checkout uboot
-        uses: actions/checkout@v3
-        with:
-            repository: 'revyos/thead-u-boot'
-            ref: 'lpi4a'
-            path: 'uboot'
 
-      - name: Checkout opensbi
-        uses: actions/checkout@v3
-        with:
-            repository: 'revyos/thead-opensbi'
-            ref: 'lpi4a'
-            path: 'opensbi'
-
-      - name: Checkout rtl8723ds
-        uses: actions/checkout@v3
-        with:
-            repository: 'revyos/rtl8723ds'
-            ref: 'master'
-            path: 'rtl8723ds'
-
-      - name: Compile Kernel && Install
+      - name: Configure toolchains
         run: |
               mkdir rootfs && mkdir rootfs/boot
               wget ${xuetie_toolchain}/${toolchain_file_name}
               tar -xvf ${toolchain_file_name} -C /opt
 
+      - name: Compile Kernel && Install
+        run: |
               export PATH="/opt/Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.6.1/bin:$PATH"
 
               # git clone -b ${kernel_branch} --depth=1 ${kernel_git} kernel
@@ -103,45 +77,82 @@ jobs:
                 sudo cp -v arch/riscv/boot/dts/thead/*.dtb ${GITHUB_WORKSPACE}/rootfs/boot/
               popd
 
-      - name: rtl8723ds compile
-        run: |
-              export PATH="/opt/Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.6.1/bin:$PATH"
-
-              pushd rtl8723ds
-                make
-                cp -vr output ${GITHUB_WORKSPACE}/rootfs/
-                for kernel_version in $(ls ${GITHUB_WORKSPACE}/rootfs/lib/modules/);
-                do
-                  sudo install -D -p -m 644 "rtl8723ds/8723ds.ko" \
-                      "../rootfs/lib/modules/${kernel_version}/kernel/drivers/net/wireless/8723ds.ko"
-                  sudo depmod -a -b "../rootfs" "${kernel_version}"
-                  echo '8723ds' >> 8723ds.conf
-                  mv 8723ds.conf "../rootfs/etc/modules-load.d/"
-                  sudo depmod -a -b "${GITHUB_WORKSPACE}/rootfs" "${kernel_version}"
-                done
-                # cp -vr output/lib/firmware ${GITHUB_WORKSPACE}/rootfs/
-              popd
-              tree ${GITHUB_WORKSPACE}/rootfs
-
       - name: IMG_MODULE compile
         run: |
               export PATH="/opt/Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.6.1/bin:$PATH"
 
+              export PVR_BUILD_DIR=thead_linux
+              export PVR_ARCH=rogue
+              export RGX_BVNC=36.52.104.182
+              export RGX_BNC=36.52.104.182
+              export CROSS_COMPILE=${toolchain_tripe}
+
               pushd img_module/rogue_km
                 export KERNELDIR=${GITHUB_WORKSPACE}/kernel/
                 make
-                cp -vr output ${GITHUB_WORKSPACE}/rootfs/
                 for kernel_version in $(ls ${GITHUB_WORKSPACE}/rootfs/lib/modules/);
                 do
-                  sudo install -D -p -m 644 output/lib/modules/${kernel_version}/extra/drm_nulldisp.ko \
+                  sudo install -D -p -m 644 binary_thead_linux_wayland_release/target_riscv64/kbuild/drm_nulldisp.ko \
                     "${GITHUB_WORKSPACE}/rootfs/lib/modules/${kernel_version}/extra/drm_nulldisp.ko"
-                  sudo install -D -p -m 644 output/lib/modules/${kernel_version}/extra/pvrsrvkm.ko \
+                  sudo install -D -p -m 644 binary_thead_linux_wayland_release/target_riscv64/kbuild/pvrsrvkm.ko \
                     "${GITHUB_WORKSPACE}/rootfs/lib/modules/${kernel_version}/extra/pvrsrvkm.ko"
                   sudo depmod -a -b "${GITHUB_WORKSPACE}/rootfs" "${kernel_version}"
                 done
                 # cp -vr output/lib/firmware ${GITHUB_WORKSPACE}/rootfs/
               popd
               tree ${GITHUB_WORKSPACE}/rootfs
+
+      - name: compress
+        run: tar -zcvf kernel.tar.gz rootfs
+
+      - name: 'Upload Artifact'
+        uses: actions/upload-artifact@v3
+        with:
+          name: kernel.tar.gz
+          path: kernel.tar.gz
+          retention-days: 10
+
+  misc:
+    runs-on: 	ubuntu-22.04
+    env:
+      uboot_branch: lpi4a
+      uboot_name: revyos/thead-u-boot
+      uboot_git: https://github.com/revyos/thead-u-boot.git
+      opensbi_branch: lpi4a
+      opensbi_name: revyos/thead-opensbi
+      opensbi_git: https://github.com/revyos/thead-opensbi.git
+
+    steps:
+      - name: Install software
+        run: |
+              sudo apt update && \
+              sudo apt install -y gdisk dosfstools g++-12-riscv64-linux-gnu build-essential \
+                                  libncurses-dev gawk flex bison openssl libssl-dev tree \
+                                  dkms libelf-dev libudev-dev libpci-dev libiberty-dev autoconf device-tree-compiler
+              sudo update-alternatives --install \
+                  /usr/bin/riscv64-linux-gnu-gcc riscv64-gcc /usr/bin/riscv64-linux-gnu-gcc-12 10
+              sudo update-alternatives --install \
+                  /usr/bin/riscv64-linux-gnu-g++ riscv64-g++ /usr/bin/riscv64-linux-gnu-g++-12 10
+      
+      - name: Checkout uboot
+        uses: actions/checkout@v3
+        with:
+            repository: 'revyos/thead-u-boot'
+            ref: 'lpi4a'
+            path: 'uboot'
+
+      - name: Checkout opensbi
+        uses: actions/checkout@v3
+        with:
+            repository: 'revyos/thead-opensbi'
+            ref: 'lpi4a'
+            path: 'opensbi'
+
+      - name: Configure toolchains
+        run: |
+              mkdir rootfs && mkdir rootfs/boot
+              wget ${xuetie_toolchain}/${toolchain_file_name}
+              tar -xvf ${toolchain_file_name} -C /opt
 
       - name: uboot compile
         run: |
@@ -171,11 +182,11 @@ jobs:
               tree ${GITHUB_WORKSPACE}/rootfs
 
       - name: compress
-        run: tar -zcvf kernel.tar.gz rootfs
+        run: tar -zcvf misc.tar.gz rootfs
 
       - name: 'Upload Artifact'
         uses: actions/upload-artifact@v3
         with:
-          name: kernel.tar.gz
-          path: kernel.tar.gz
+          name: misc.tar.gz
+          path: misc.tar.gz
           retention-days: 10
