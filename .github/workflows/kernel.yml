@@ -1,4 +1,4 @@
-name: c910v
+name: revyos-kernel-build
 
 on:
   push:
@@ -21,6 +21,12 @@ jobs:
       uboot_branch: lpi4a
       uboot_name: revyos/thead-u-boot
       uboot_git: https://github.com/revyos/thead-u-boot.git
+      opensbi_branch: lpi4a
+      opensbi_name: revyos/thead-opensbi
+      opensbi_git: https://github.com/revyos/thead-opensbi.git
+      rtl8723ds_branch: master
+      rtl8723ds_name: revyos/rtl8723ds
+      rtl8723ds_git: https://github.com/revyos/rtl8723ds.git
       toolchain_tripe: riscv64-unknown-linux-gnu-
       ARCH: riscv
 
@@ -57,6 +63,20 @@ jobs:
             ref: 'lpi4a'
             path: 'uboot'
 
+      - name: Checkout opensbi
+        uses: actions/checkout@v3
+        with:
+            repository: 'revyos/thead-opensbi'
+            ref: 'lpi4a'
+            path: 'opensbi'
+
+      - name: Checkout rtl8723ds
+        uses: actions/checkout@v3
+        with:
+            repository: 'revyos/rtl8723ds'
+            ref: 'master'
+            path: 'rtl8723ds'
+
       - name: Compile Kernel && Install
         run: |
               mkdir rootfs && mkdir rootfs/boot
@@ -83,24 +103,45 @@ jobs:
                 sudo cp -v arch/riscv/boot/dts/thead/*.dtb ${GITHUB_WORKSPACE}/rootfs/boot/
               popd
 
-      # - name: IMG_MODULE compile
-      #   run: |
-      #         export PATH="/opt/Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.6.1/bin:$PATH"
-      #         pushd img_module
-      #           export KERNELDIR=${GITHUB_WORKSPACE}/kernel/
-      #           make
-      #           cp -vr output ${GITHUB_WORKSPACE}/rootfs/
-      #           for kernel_version in $(ls ${GITHUB_WORKSPACE}/rootfs/lib/modules/);
-      #           do
-      #             sudo install -D -p -m 644 output/lib/modules/${kernel_version}/extra/drm_nulldisp.ko \
-      #               "${GITHUB_WORKSPACE}/rootfs/lib/modules/${kernel_version}/extra/drm_nulldisp.ko"
-      #             sudo install -D -p -m 644 output/lib/modules/${kernel_version}/extra/pvrsrvkm.ko \
-      #               "${GITHUB_WORKSPACE}/rootfs/lib/modules/${kernel_version}/extra/pvrsrvkm.ko"
-      #             sudo depmod -a -b "${GITHUB_WORKSPACE}/rootfs" "${kernel_version}"
-      #           done
-      #           # cp -vr output/lib/firmware ${GITHUB_WORKSPACE}/rootfs/
-      #         popd
-      #         tree ${GITHUB_WORKSPACE}/rootfs
+      - name: rtl8723ds compile
+        run: |
+              export PATH="/opt/Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.6.1/bin:$PATH"
+
+              pushd rtl8723ds
+                make
+                cp -vr output ${GITHUB_WORKSPACE}/rootfs/
+                for kernel_version in $(ls ${GITHUB_WORKSPACE}/rootfs/lib/modules/);
+                do
+                  sudo install -D -p -m 644 "rtl8723ds/8723ds.ko" \
+                      "../rootfs/lib/modules/${kernel_version}/kernel/drivers/net/wireless/8723ds.ko"
+                  sudo depmod -a -b "../rootfs" "${kernel_version}"
+                  echo '8723ds' >> 8723ds.conf
+                  mv 8723ds.conf "../rootfs/etc/modules-load.d/"
+                  sudo depmod -a -b "${GITHUB_WORKSPACE}/rootfs" "${kernel_version}"
+                done
+                # cp -vr output/lib/firmware ${GITHUB_WORKSPACE}/rootfs/
+              popd
+              tree ${GITHUB_WORKSPACE}/rootfs
+
+      - name: IMG_MODULE compile
+        run: |
+              export PATH="/opt/Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.6.1/bin:$PATH"
+
+              pushd img_module/rogue_km
+                export KERNELDIR=${GITHUB_WORKSPACE}/kernel/
+                make
+                cp -vr output ${GITHUB_WORKSPACE}/rootfs/
+                for kernel_version in $(ls ${GITHUB_WORKSPACE}/rootfs/lib/modules/);
+                do
+                  sudo install -D -p -m 644 output/lib/modules/${kernel_version}/extra/drm_nulldisp.ko \
+                    "${GITHUB_WORKSPACE}/rootfs/lib/modules/${kernel_version}/extra/drm_nulldisp.ko"
+                  sudo install -D -p -m 644 output/lib/modules/${kernel_version}/extra/pvrsrvkm.ko \
+                    "${GITHUB_WORKSPACE}/rootfs/lib/modules/${kernel_version}/extra/pvrsrvkm.ko"
+                  sudo depmod -a -b "${GITHUB_WORKSPACE}/rootfs" "${kernel_version}"
+                done
+                # cp -vr output/lib/firmware ${GITHUB_WORKSPACE}/rootfs/
+              popd
+              tree ${GITHUB_WORKSPACE}/rootfs
 
       - name: uboot compile
         run: |
@@ -110,13 +151,25 @@ jobs:
                 sed -i "s/YYLTYPE yylloc;/extern YYLTYPE yylloc;/" scripts/dtc/dtc-lexer.l
                 make ARCH=${ARCH} CROSS_COMPILE=${toolchain_tripe} light_lpi4a_defconfig
                 make ARCH=${ARCH} CROSS_COMPILE=${toolchain_tripe} -j$(nproc)
-                find . -name "u-boot-with-spl.bin" | xargs -I{} cp -av {} ${GITHUB_WORKSPACE}/rootfs/u-boot-with-spl-lpi4a.bin
-                make ARCH=${ARCH} CROSS_COMPILE=${toolchain_tripe} clean
-                make ARCH=${ARCH} CROSS_COMPILE=${toolchain_tripe} light_a_val_defconfig
-                make ARCH=${ARCH} CROSS_COMPILE=${toolchain_tripe} -j$(nproc)
-                find . -name "u-boot-with-spl.bin" | xargs -I{} cp -av {} ${GITHUB_WORKSPACE}/rootfs/u-boot-with-spl-vala.bin
+                find . -name "u-boot-with-spl.bin" | xargs -I{} cp -av {} ${GITHUB_WORKSPACE}/rootfs/boot/u-boot-with-spl-lpi4a.bin
+                # make ARCH=${ARCH} CROSS_COMPILE=${toolchain_tripe} clean
+                # make ARCH=${ARCH} CROSS_COMPILE=${toolchain_tripe} light_a_val_defconfig
+                # make ARCH=${ARCH} CROSS_COMPILE=${toolchain_tripe} -j$(nproc)
+                # find . -name "u-boot-with-spl.bin" | xargs -I{} cp -av {} ${GITHUB_WORKSPACE}/rootfs/boot/u-boot-with-spl-vala.bin
               popd
+              tree ${GITHUB_WORKSPACE}/rootfs
               
+      - name: opensbi compile
+        run: |
+              export PATH="/opt/Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.6.1/bin:$PATH"
+
+              pushd opensbi
+                make PLATFORM=generic ARCH=${ARCH} CROSS_COMPILE=${toolchain_tripe} 
+                sudo install -D -p -m 644 build/platform/generic/firmware/fw_payload.bin \
+                    "${GITHUB_WORKSPACE}/rootfs/boot/"
+              popd
+              tree ${GITHUB_WORKSPACE}/rootfs
+
       - name: compress
         run: tar -zcvf kernel.tar.gz rootfs
 
