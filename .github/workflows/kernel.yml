@@ -2,7 +2,7 @@ name: revyos-kernel-build
 
 on:
   push:
- 
+  workflow_dispatch:
   schedule:
     - cron: "0 2 * * *"
 
@@ -14,7 +14,7 @@ env:
 
 jobs:
   kernel:
-    runs-on: 	ubuntu-22.04
+    runs-on:	ubuntu-22.04
     env:
       kernel_branch: lpi4a
       kernel_name: revyos/thead-kernel
