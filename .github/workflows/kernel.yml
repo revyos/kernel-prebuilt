@@ -58,20 +58,25 @@ jobs:
       - name: Compile Kernel && Install
         run: |
               export PATH="/opt/Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.6.1/bin:$PATH"
+              export CROSS_COMPILE=${toolchain_tripe}
+              export ARCH=${ARCH}
+              
+              riscv64-unknown-linux-gnu-strip --help
 
               # git clone -b ${kernel_branch} --depth=1 ${kernel_git} kernel
               pushd kernel
-                make CROSS_COMPILE=${toolchain_tripe} ARCH=${ARCH} revyos_defconfig
-                make CROSS_COMPILE=${toolchain_tripe} ARCH=${ARCH} -j$(nproc)
-                make CROSS_COMPILE=${toolchain_tripe} ARCH=${ARCH} -j$(nproc) dtbs
+                make revyos_defconfig
+                make -j$(nproc)
+                make -j$(nproc) dtbs
                 if [ x"$(cat .config | grep CONFIG_MODULES=y)" = x"CONFIG_MODULES=y" ]; then
-                  sudo make CROSS_COMPILE=${toolchain_tripe} ARCH=${ARCH} INSTALL_MOD_PATH=${GITHUB_WORKSPACE}/rootfs/ modules_install -j$(nproc)
+                  sudo make INSTALL_MOD_PATH=${GITHUB_WORKSPACE}/rootfs/ modules_install -j$(nproc)
                 fi
-                sudo make CROSS_COMPILE=${toolchain_tripe} ARCH=${ARCH} INSTALL_PATH=${GITHUB_WORKSPACE}/rootfs/boot zinstall -j$(nproc)
+                #sudo make INSTALL_PATH=${GITHUB_WORKSPACE}/rootfs/boot zinstall -j$(nproc)
+                find ${GITHUB_WORKSPACE}/rootfs/ -name *.ko -exec sudo riscv64-unknown-linux-gnu-strip -g {} \;
 
                 # Install Kernel
                 sudo cp -v arch/riscv/boot/Image ${GITHUB_WORKSPACE}/rootfs/boot/
-                sudo cp -v arch/riscv/boot/Image.gz ${GITHUB_WORKSPACE}/rootfs/boot/
+                #sudo cp -v arch/riscv/boot/Image.gz ${GITHUB_WORKSPACE}/rootfs/boot/
 
                 # Install DTB
                 sudo cp -v arch/riscv/boot/dts/thead/*.dtb ${GITHUB_WORKSPACE}/rootfs/boot/
