@@ -65,6 +65,7 @@ jobs:
 
               # git clone -b ${kernel_branch} --depth=1 ${kernel_git} kernel
               pushd kernel
+                gh pr checkout 1
                 make revyos_defconfig
                 make -j$(nproc)
                 make -j$(nproc) dtbs
