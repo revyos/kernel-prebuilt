@@ -110,7 +110,7 @@ jobs:
         with:
           name: kernel.tar.gz
           path: kernel.tar.gz
-          retention-days: 10
+          retention-days: 30
 
   misc:
     runs-on: 	ubuntu-22.04
@@ -159,7 +159,6 @@ jobs:
               export PATH="/opt/Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.6.1/bin:$PATH"
 
               pushd uboot
-                sed -i "s/YYLTYPE yylloc;/extern YYLTYPE yylloc;/" scripts/dtc/dtc-lexer.l
                 make ARCH=${ARCH} CROSS_COMPILE=${toolchain_tripe} light_lpi4a_defconfig
                 make ARCH=${ARCH} CROSS_COMPILE=${toolchain_tripe} -j$(nproc)
                 find . -name "u-boot-with-spl.bin" | xargs -I{} cp -av {} ${GITHUB_WORKSPACE}/rootfs/boot/u-boot-with-spl-lpi4a.bin
@@ -189,4 +188,4 @@ jobs:
         with:
           name: misc.tar.gz
           path: misc.tar.gz
-          retention-days: 10
+          retention-days: 30
